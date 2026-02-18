@@ -1,7 +1,11 @@
 #pragma once
 
 #include <stdint.h>
-#include <libusb.h>
+
+// Attempt to include libusb. If the SDK pathing is weird, 
+// we might need "orbis/libusb.h" or just "libusb.h". 
+// Based on typical OO toolchains:
+#include <orbis/libusb.h> 
 
 #define ORBIS_PAD_BUTTON_L3          0x00000002
 #define ORBIS_PAD_BUTTON_R3          0x00000004
