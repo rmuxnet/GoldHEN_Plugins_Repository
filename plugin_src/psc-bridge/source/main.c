@@ -3,23 +3,31 @@
 #include <string.h>
 #include "../include/dualsense.h"
 
-#define DLLEXPORT __declspec(dllexport)
+// Define exports for the linker
+#define DLLEXPORT __attribute__((visibility("default")))
+
 #define DS5_VID 0x054C
 #define DS5_PID 0x0CE6
 #define DS5_EP_IN 0x81
 
+// Globals
 libusb_context *ctx = NULL;
 libusb_device_handle *dev_handle = NULL;
 int usb_active = 0;
 
+// Original function pointer storage
 void* (*original_scePadRead)(int handle, ScePadData* data, int count);
 
+// Helper to map PS5 bytes to PS4 bitmask
 void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
     if (!raw_usb_data || !ps4_data) return;
 
     const PS5_Input_Report* ps5 = (const PS5_Input_Report*)raw_usb_data;
 
+    // Reset buttons
     ps4_data->buttons = 0;
+
+    // Direct Copy Analogs
     ps4_data->leftStickX  = ps5->left_stick_x;
     ps4_data->leftStickY  = ps5->left_stick_y;
     ps4_data->rightStickX = ps5->right_stick_x;
@@ -27,11 +35,13 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
     ps4_data->leftTrigger = ps5->l2_analog;
     ps4_data->rightTrigger= ps5->r2_analog;
 
+    // Map Shapes
     if (ps5->btn_shapes & 0x10) ps4_data->buttons |= ORBIS_PAD_BUTTON_SQUARE;
     if (ps5->btn_shapes & 0x20) ps4_data->buttons |= ORBIS_PAD_BUTTON_CROSS;
     if (ps5->btn_shapes & 0x40) ps4_data->buttons |= ORBIS_PAD_BUTTON_CIRCLE;
     if (ps5->btn_shapes & 0x80) ps4_data->buttons |= ORBIS_PAD_BUTTON_TRIANGLE;
 
+    // Map D-Pad
     uint8_t dpad = ps5->btn_shapes & 0x0F;
     switch (dpad) {
         case 0: ps4_data->buttons |= ORBIS_PAD_BUTTON_UP; break;
@@ -44,6 +54,7 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
         case 7: ps4_data->buttons |= (ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_UP); break;
     }
 
+    // Map Misc
     if (ps5->btn_misc & 0x01) ps4_data->buttons |= ORBIS_PAD_BUTTON_L1;
     if (ps5->btn_misc & 0x02) ps4_data->buttons |= ORBIS_PAD_BUTTON_R1;
     if (ps5->btn_misc & 0x04) ps4_data->buttons |= ORBIS_PAD_BUTTON_L2;
@@ -52,11 +63,15 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
     if (ps5->btn_misc & 0x40) ps4_data->buttons |= ORBIS_PAD_BUTTON_L3;
     if (ps5->btn_misc & 0x80) ps4_data->buttons |= ORBIS_PAD_BUTTON_R3;
 
+    // Map System
     if (ps5->btn_system & 0x02) ps4_data->buttons |= ORBIS_PAD_BUTTON_TOUCH_PAD;
 }
 
 void check_usb_device() {
-    if (!ctx) libusb_init(&ctx);
+    if (!ctx) {
+        int r = libusb_init(&ctx);
+        if (r < 0) return;
+    }
     
     if (!dev_handle) {
         dev_handle = libusb_open_device_with_vid_pid(ctx, DS5_VID, DS5_PID);
@@ -70,8 +85,13 @@ void check_usb_device() {
     }
 }
 
-extern "C" int hooked_scePadRead(int handle, ScePadData* data, int count) {
-    int ret = original_scePadRead(handle, data, count);
+// Hooked function
+int hooked_scePadRead(int handle, ScePadData* data, int count) {
+    // Call original
+    int ret = 0;
+    if (original_scePadRead) {
+        ret = original_scePadRead(handle, data, count);
+    }
 
     check_usb_device();
 
@@ -93,16 +113,17 @@ extern "C" int hooked_scePadRead(int handle, ScePadData* data, int count) {
     return ret;
 }
 
-extern "C" {
-    DLLEXPORT void _init() {
-        libusb_init(&ctx);
+// Initialization and Cleanup
+DLLEXPORT void _init() {
+    libusb_init(&ctx);
+    // Hook registration usually happens here via GoldHEN's internal hook API 
+    // or through the hook library you are linking against.
+}
+
+DLLEXPORT void _fini() {
+    if (dev_handle) {
+        libusb_release_interface(dev_handle, 0);
+        libusb_close(dev_handle);
     }
-    
-    DLLEXPORT void _fini() {
-        if (dev_handle) {
-            libusb_release_interface(dev_handle, 0);
-            libusb_close(dev_handle);
-        }
-        if (ctx) libusb_exit(ctx);
-    }
+    if (ctx) libusb_exit(ctx);
 }
