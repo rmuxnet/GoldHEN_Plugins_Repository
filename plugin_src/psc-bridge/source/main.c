@@ -4,12 +4,12 @@
 #include "../include/dualsense.h"
 
 // Include common headers for GoldHEN compatibility
-#include "../../common/plugin_common.h"
+#include "plugin_common.h"
 
 // --- Metadata for GoldHEN ---
 attr_public const char *g_pluginName = "dualsense_bridge";
 attr_public const char *g_pluginDesc = "PS5 Controller Support";
-attr_public const char *g_pluginAuth = "YourName";
+attr_public const char *g_pluginAuth = "rmuxnet";
 attr_public uint32_t g_pluginVersion = 0x00000100; // 1.00
 
 #define DS5_VID 0x054C
@@ -73,17 +73,20 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
 
 void check_usb_device() {
     if (!ctx) {
-        int r = libusb_init(&ctx);
+        // Use sceUsbdInit instead of libusb_init
+        int r = sceUsbdInit(&ctx);
         if (r < 0) return;
     }
     
     if (!dev_handle) {
-        dev_handle = libusb_open_device_with_vid_pid(ctx, DS5_VID, DS5_PID);
+        // Use sceUsbdOpenDeviceWithVidPid
+        dev_handle = sceUsbdOpenDeviceWithVidPid(ctx, DS5_VID, DS5_PID);
         if (dev_handle) {
-            if (libusb_kernel_driver_active(dev_handle, 0) == 1) {
-                libusb_detach_kernel_driver(dev_handle, 0);
+            // Use sceUsbdKernelDriverActive / sceUsbdDetachKernelDriver
+            if (sceUsbdKernelDriverActive(dev_handle, 0) == 1) {
+                sceUsbdDetachKernelDriver(dev_handle, 0);
             }
-            libusb_claim_interface(dev_handle, 0);
+            sceUsbdClaimInterface(dev_handle, 0);
             usb_active = 1;
         }
     }
@@ -103,12 +106,14 @@ int hooked_scePadRead(int handle, ScePadData* data, int count) {
     if (usb_active && dev_handle && ret == 0 && data != NULL) {
         uint8_t buffer[64];
         int transferred = 0;
-        int r = libusb_interrupt_transfer(dev_handle, DS5_EP_IN, buffer, 64, &transferred, 2);
+        
+        // Use sceUsbdInterruptTransfer
+        int r = sceUsbdInterruptTransfer(dev_handle, DS5_EP_IN, buffer, 64, &transferred, 2);
 
         if (r == 0 && transferred > 10 && buffer[0] == 0x01) {
             translate_ps5_to_ps4(buffer, data);
         } else if (r == LIBUSB_ERROR_NO_DEVICE) {
-            libusb_close(dev_handle);
+            sceUsbdClose(dev_handle);
             dev_handle = NULL;
             usb_active = 0;
         }
@@ -124,8 +129,8 @@ int32_t attr_public plugin_load(int32_t argc, const char* argv[]) {
     snprintf(msg, sizeof(msg), "DualSense Bridge Loaded");
     NotifyStatic(TEX_ICON_SYSTEM, msg);
     
-    // Initialize libusb context
-    libusb_init(&ctx);
+    // Initialize libusb context using native API
+    sceUsbdInit(&ctx);
     
     // TODO: Register hook here via GoldHEN SDK API if dynamic hooking is supported,
     // otherwise this relies on static detours setup elsewhere in the SDK.
@@ -136,10 +141,10 @@ int32_t attr_public plugin_load(int32_t argc, const char* argv[]) {
 
 int32_t attr_public plugin_unload(int32_t argc, const char* argv[]) {
     if (dev_handle) {
-        libusb_release_interface(dev_handle, 0);
-        libusb_close(dev_handle);
+        sceUsbdReleaseInterface(dev_handle, 0);
+        sceUsbdClose(dev_handle);
     }
-    if (ctx) libusb_exit(ctx);
+    if (ctx) sceUsbdExit(ctx);
     
     return 0;
 }
