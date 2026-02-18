@@ -70,7 +70,7 @@ void check_usb_device() {
     }
 }
 
-int hooked_scePadRead(int handle, ScePadData* data, int count) {
+extern "C" int hooked_scePadRead(int handle, ScePadData* data, int count) {
     int ret = original_scePadRead(handle, data, count);
 
     check_usb_device();
@@ -94,10 +94,11 @@ int hooked_scePadRead(int handle, ScePadData* data, int count) {
 }
 
 extern "C" {
-    DLLEXPORT void module_start() {
+    DLLEXPORT void _init() {
         libusb_init(&ctx);
     }
-    DLLEXPORT void module_stop() {
+    
+    DLLEXPORT void _fini() {
         if (dev_handle) {
             libusb_release_interface(dev_handle, 0);
             libusb_close(dev_handle);
