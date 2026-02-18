@@ -3,31 +3,35 @@
 #include <string.h>
 #include "../include/dualsense.h"
 
-// Define exports for the linker
-#define DLLEXPORT __attribute__((visibility("default")))
+// Include common headers for GoldHEN compatibility
+#include "../../common/plugin_common.h"
+
+// --- Metadata for GoldHEN ---
+attr_public const char *g_pluginName = "dualsense_bridge";
+attr_public const char *g_pluginDesc = "PS5 Controller Support";
+attr_public const char *g_pluginAuth = "YourName";
+attr_public uint32_t g_pluginVersion = 0x00000100; // 1.00
 
 #define DS5_VID 0x054C
 #define DS5_PID 0x0CE6
 #define DS5_EP_IN 0x81
 
-// Globals
 libusb_context *ctx = NULL;
 libusb_device_handle *dev_handle = NULL;
 int usb_active = 0;
 
-// Original function pointer storage
+// Function pointer for the original pad read
 void* (*original_scePadRead)(int handle, ScePadData* data, int count);
 
-// Helper to map PS5 bytes to PS4 bitmask
 void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
     if (!raw_usb_data || !ps4_data) return;
 
     const PS5_Input_Report* ps5 = (const PS5_Input_Report*)raw_usb_data;
 
-    // Reset buttons
+    // Reset standard buttons
     ps4_data->buttons = 0;
 
-    // Direct Copy Analogs
+    // Direct Analog mapping
     ps4_data->leftStickX  = ps5->left_stick_x;
     ps4_data->leftStickY  = ps5->left_stick_y;
     ps4_data->rightStickX = ps5->right_stick_x;
@@ -35,13 +39,13 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
     ps4_data->leftTrigger = ps5->l2_analog;
     ps4_data->rightTrigger= ps5->r2_analog;
 
-    // Map Shapes
+    // Shapes
     if (ps5->btn_shapes & 0x10) ps4_data->buttons |= ORBIS_PAD_BUTTON_SQUARE;
     if (ps5->btn_shapes & 0x20) ps4_data->buttons |= ORBIS_PAD_BUTTON_CROSS;
     if (ps5->btn_shapes & 0x40) ps4_data->buttons |= ORBIS_PAD_BUTTON_CIRCLE;
     if (ps5->btn_shapes & 0x80) ps4_data->buttons |= ORBIS_PAD_BUTTON_TRIANGLE;
 
-    // Map D-Pad
+    // D-Pad
     uint8_t dpad = ps5->btn_shapes & 0x0F;
     switch (dpad) {
         case 0: ps4_data->buttons |= ORBIS_PAD_BUTTON_UP; break;
@@ -54,7 +58,7 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
         case 7: ps4_data->buttons |= (ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_UP); break;
     }
 
-    // Map Misc
+    // Misc
     if (ps5->btn_misc & 0x01) ps4_data->buttons |= ORBIS_PAD_BUTTON_L1;
     if (ps5->btn_misc & 0x02) ps4_data->buttons |= ORBIS_PAD_BUTTON_R1;
     if (ps5->btn_misc & 0x04) ps4_data->buttons |= ORBIS_PAD_BUTTON_L2;
@@ -63,7 +67,7 @@ void translate_ps5_to_ps4(const uint8_t* raw_usb_data, ScePadData* ps4_data) {
     if (ps5->btn_misc & 0x40) ps4_data->buttons |= ORBIS_PAD_BUTTON_L3;
     if (ps5->btn_misc & 0x80) ps4_data->buttons |= ORBIS_PAD_BUTTON_R3;
 
-    // Map System
+    // System
     if (ps5->btn_system & 0x02) ps4_data->buttons |= ORBIS_PAD_BUTTON_TOUCH_PAD;
 }
 
@@ -85,14 +89,15 @@ void check_usb_device() {
     }
 }
 
-// Hooked function
+// The Hooked Function
 int hooked_scePadRead(int handle, ScePadData* data, int count) {
-    // Call original
+    // 1. Call original
     int ret = 0;
     if (original_scePadRead) {
         ret = original_scePadRead(handle, data, count);
     }
 
+    // 2. Override with USB data if available
     check_usb_device();
 
     if (usb_active && dev_handle && ret == 0 && data != NULL) {
@@ -100,10 +105,8 @@ int hooked_scePadRead(int handle, ScePadData* data, int count) {
         int transferred = 0;
         int r = libusb_interrupt_transfer(dev_handle, DS5_EP_IN, buffer, 64, &transferred, 2);
 
-        if (r == 0 && transferred > 10) {
-            if (buffer[0] == 0x01) {
-                translate_ps5_to_ps4(buffer, data);
-            }
+        if (r == 0 && transferred > 10 && buffer[0] == 0x01) {
+            translate_ps5_to_ps4(buffer, data);
         } else if (r == LIBUSB_ERROR_NO_DEVICE) {
             libusb_close(dev_handle);
             dev_handle = NULL;
@@ -113,17 +116,38 @@ int hooked_scePadRead(int handle, ScePadData* data, int count) {
     return ret;
 }
 
-// Initialization and Cleanup
-DLLEXPORT void _init() {
+// --- Standard Plugin Exports ---
+
+int32_t attr_public plugin_load(int32_t argc, const char* argv[]) {
+    // Notify user on load
+    char msg[128] = {0};
+    snprintf(msg, sizeof(msg), "DualSense Bridge Loaded");
+    NotifyStatic(TEX_ICON_SYSTEM, msg);
+    
+    // Initialize libusb context
     libusb_init(&ctx);
-    // Hook registration usually happens here via GoldHEN's internal hook API 
-    // or through the hook library you are linking against.
+    
+    // TODO: Register hook here via GoldHEN SDK API if dynamic hooking is supported,
+    // otherwise this relies on static detours setup elsewhere in the SDK.
+    // Example: DetourFunction("libScePad.sprx", "scePadRead", hooked_scePadRead, &original_scePadRead);
+    
+    return 0;
 }
 
-DLLEXPORT void _fini() {
+int32_t attr_public plugin_unload(int32_t argc, const char* argv[]) {
     if (dev_handle) {
         libusb_release_interface(dev_handle, 0);
         libusb_close(dev_handle);
     }
     if (ctx) libusb_exit(ctx);
+    
+    return 0;
+}
+
+s32 attr_module_hidden module_start(s64 argc, const void *args) {
+    return 0;
+}
+
+s32 attr_module_hidden module_stop(s64 argc, const void *args) {
+    return 0;
 }
