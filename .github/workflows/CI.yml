@@ -51,7 +51,7 @@ jobs:
         echo "commit_hash=$(echo ${GITHUB_SHA} | cut -c1-8)" >> $GITHUB_ENV
 
     - name: Download OpenOrbis Toolchain
-      run: curl -sL https://github.com/illusion0001/OpenOrbis-PS4-Toolchain/releases/latest/download/toolchain.tar.gz | tar xz -C ./
+      run: curl -sL https://github.com/rmuxnet/OpenOrbis-PS4-Toolchain/releases/latest/download/toolchain.tar.gz | tar xz -C ./
 
     - name: Install mini xml
       working-directory: mxml/ps4
